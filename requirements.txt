@@ -2,6 +2,4 @@ streamlit>=1.33
 plotly>=5.20
 pandas>=2.2
 numpy>=1.26
-
-# Optional for price analytics and fundamentals panel:
-# yfinance>=0.2.50
+yfinance>=0.2.50
