@@ -1,6 +1,5 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
@@ -9,6 +8,11 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import warnings
 from datetime import datetime
+
+try:
+    import yfinance as yf
+except ModuleNotFoundError:
+    yf = None
 
 # Suppress warnings for a clean terminal output
 warnings.filterwarnings('ignore')
@@ -136,12 +140,15 @@ def fetch_latest_news(ticker, topic="stock", limit=8):
     """Returns ticker-specific headlines using a fallback chain."""
     errors = []
 
-    try:
-        yf_news = yf.Ticker(ticker).news
-        if yf_news:
-            return _normalize_yf_news(yf_news, limit), "yfinance", None
-    except Exception as e:
-        errors.append(f"yfinance failed: {e}")
+    if yf is not None:
+        try:
+            yf_news = yf.Ticker(ticker).news
+            if yf_news:
+                return _normalize_yf_news(yf_news, limit), "yfinance", None
+        except Exception as e:
+            errors.append(f"yfinance failed: {e}")
+    else:
+        errors.append("yfinance unavailable")
 
     try:
         google_news = _fetch_google_rss(ticker, topic, limit)
@@ -163,6 +170,9 @@ def fetch_latest_news(ticker, topic="stock", limit=8):
 # --- 3. DATA & QUANT ENGINE (NATIVE PANDAS) ---
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_and_analyze_data(ticker, period="1y"):
+    if yf is None:
+        return None, None, None
+
     try:
         # Fetch Stock and Benchmark (SPY) Data
         stock = yf.Ticker(ticker)
@@ -213,6 +223,22 @@ def load_and_analyze_data(ticker, period="1y"):
         return None, None, None
 
 
+def render_news_panel(news_data, news_provider, news_error, ticker_input, news_topic):
+    st.markdown("**Live Catalyst Feed (RSS)**")
+    st.caption(f"Query: {ticker_input} + {news_topic}")
+    st.caption(f"Provider: {news_provider}")
+    st.caption(f"Headlines loaded: {len(news_data)}")
+    if news_data:
+        for article in news_data:
+            st.markdown(f"[{article['title']}]({article['link']})")
+            st.caption(f"{article['source']} | {article['date']}")
+            st.markdown("---")
+    else:
+        st.write("No recent catalyst news available.")
+        if news_error:
+            st.warning(news_error)
+
+
 # --- 4. UI AND LAYOUT ---
 st.sidebar.header("Terminal Controls")
 ticker_input = st.sidebar.text_input("Enter Ticker Symbol:", "XOM").upper()
@@ -255,7 +281,11 @@ if ticker_input:
         news_data, news_provider, news_error = fetch_latest_news(ticker_input, topic=news_topic, limit=news_limit)
 
     if df is None:
-        st.error(f"Error fetching data for {ticker_input}. Ensure the ticker is valid.")
+        st.warning(
+            "Price analytics are unavailable because yfinance is not installed or failed to fetch data. "
+            "Live news feed is still active below."
+        )
+        render_news_panel(news_data, news_provider, news_error, ticker_input, news_topic)
     else:
         current = df.iloc[-1]
 
@@ -325,16 +355,4 @@ if ticker_input:
                 st.write(f"**{icon}** | {check}")
 
         with news_col:
-            st.markdown("**Live Catalyst Feed (RSS)**")
-            st.caption(f"Query: {ticker_input} + {news_topic}")
-            st.caption(f"Provider: {news_provider}")
-            st.caption(f"Headlines loaded: {len(news_data)}")
-            if news_data:
-                for article in news_data:
-                    st.markdown(f"[{article['title']}]({article['link']})")
-                    st.caption(f"{article['source']} | {article['date']}")
-                    st.markdown("---")
-            else:
-                st.write("No recent catalyst news available.")
-                if news_error:
-                    st.warning(news_error)
+            render_news_panel(news_data, news_provider, news_error, ticker_input, news_topic)
